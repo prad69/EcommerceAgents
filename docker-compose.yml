@@ -1,0 +1,144 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: ecommerce_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-ecommerce_agents}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - ecommerce_network
+
+  # Redis for Message Queue and Caching
+  redis:
+    image: redis:7-alpine
+    container_name: ecommerce_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-password}
+    networks:
+      - ecommerce_network
+
+  # Weaviate Vector Database (Alternative to Pinecone)
+  weaviate:
+    image: semitechnologies/weaviate:1.22.4
+    container_name: ecommerce_weaviate
+    ports:
+      - "8080:8080"
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
+      PERSISTENCE_DATA_PATH: '/var/lib/weaviate'
+      DEFAULT_VECTORIZER_MODULE: 'none'
+      ENABLE_MODULES: 'text2vec-openai,text2vec-cohere,text2vec-huggingface,ref2vec-centroid,generative-openai,qna-openai'
+      CLUSTER_HOSTNAME: 'node1'
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    networks:
+      - ecommerce_network
+
+  # FastAPI Backend
+  api:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: ecommerce_api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-ecommerce_agents}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-password}@redis:6379/0
+      - WEAVIATE_URL=http://weaviate:8080
+    depends_on:
+      - postgres
+      - redis
+      - weaviate
+    volumes:
+      - .:/app
+    networks:
+      - ecommerce_network
+    restart: unless-stopped
+
+  # Celery Worker for Background Tasks
+  celery-worker:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: ecommerce_celery_worker
+    command: celery -A src.core.celery worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-ecommerce_agents}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-password}@redis:6379/0
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - .:/app
+    networks:
+      - ecommerce_network
+    restart: unless-stopped
+
+  # Celery Beat for Scheduled Tasks
+  celery-beat:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: ecommerce_celery_beat
+    command: celery -A src.core.celery beat --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-ecommerce_agents}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-password}@redis:6379/0
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - .:/app
+    networks:
+      - ecommerce_network
+    restart: unless-stopped
+
+  # Prometheus for Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ecommerce_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - ecommerce_network
+
+  # Grafana for Metrics Visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ecommerce_grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - ecommerce_network
+
+volumes:
+  postgres_data:
+  redis_data:
+  weaviate_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  ecommerce_network:
+    driver: bridge

@@ -1,0 +1,234 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ecommerce-web
+  namespace: ecommerce-agents
+  labels:
+    app.kubernetes.io/name: ecommerce-agents
+    app.kubernetes.io/component: web
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ecommerce-agents
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ecommerce-agents
+        app.kubernetes.io/component: web
+        app.kubernetes.io/version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: ecommerce-service-account
+      containers:
+      - name: web
+        image: ecommerce-agents:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        # Load configuration from ConfigMap
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: ecommerce-config
+              key: ENVIRONMENT
+        - name: DEBUG
+          valueFrom:
+            configMapKeyRef:
+              name: ecommerce-config
+              key: DEBUG
+        - name: PYTHONPATH
+          valueFrom:
+            configMapKeyRef:
+              name: ecommerce-config
+              key: PYTHONPATH
+        
+        # Load secrets
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-secrets
+              key: SECRET_KEY
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-secrets
+              key: JWT_SECRET
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-secrets
+              key: DB_PASSWORD
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-secrets
+              key: REDIS_PASSWORD
+        - name: RABBITMQ_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-secrets
+              key: RABBITMQ_PASSWORD
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-secrets
+              key: OPENAI_API_KEY
+        
+        # Database URL construction
+        - name: DATABASE_URL
+          value: "postgresql://ecommerce:$(DB_PASSWORD)@postgres-service:5432/ecommerce_prod"
+        - name: REDIS_URL
+          value: "redis://:$(REDIS_PASSWORD)@redis-service:6379/0"
+        - name: RABBITMQ_URL
+          value: "amqp://ecommerce:$(RABBITMQ_PASSWORD)@rabbitmq-service:5672/"
+        - name: ELASTICSEARCH_URL
+          value: "http://elasticsearch-service:9200"
+        
+        # Pod identification
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        
+        volumeMounts:
+        - name: logs
+          mountPath: /app/logs
+        - name: uploads
+          mountPath: /app/uploads
+        - name: tmp
+          mountPath: /tmp
+      
+      volumes:
+      - name: logs
+        emptyDir: {}
+      - name: uploads
+        persistentVolumeClaim:
+          claimName: ecommerce-uploads-pvc
+      - name: tmp
+        emptyDir: {}
+      
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      
+      restartPolicy: Always
+      
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/component
+                  operator: In
+                  values:
+                  - web
+              topologyKey: kubernetes.io/hostname
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecommerce-web-service
+  namespace: ecommerce-agents
+  labels:
+    app.kubernetes.io/name: ecommerce-agents
+    app.kubernetes.io/component: web
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ecommerce-agents
+    app.kubernetes.io/component: web
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ecommerce-web-hpa
+  namespace: ecommerce-agents
+  labels:
+    app.kubernetes.io/name: ecommerce-agents
+    app.kubernetes.io/component: web
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ecommerce-web
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60

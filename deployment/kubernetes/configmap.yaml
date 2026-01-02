@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ecommerce-config
+  namespace: ecommerce-agents
+  labels:
+    app.kubernetes.io/name: ecommerce-agents
+    app.kubernetes.io/component: config
+data:
+  # Application Configuration
+  ENVIRONMENT: "production"
+  DEBUG: "false"
+  PYTHONPATH: "/app"
+  
+  # Database Configuration
+  DATABASE_HOST: "postgres-service"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: "ecommerce_prod"
+  DATABASE_POOL_SIZE: "20"
+  DATABASE_MAX_OVERFLOW: "30"
+  
+  # Redis Configuration
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  
+  # RabbitMQ Configuration
+  RABBITMQ_HOST: "rabbitmq-service"
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_USER: "ecommerce"
+  
+  # Elasticsearch Configuration
+  ELASTICSEARCH_HOST: "elasticsearch-service"
+  ELASTICSEARCH_PORT: "9200"
+  
+  # Monitoring Configuration
+  PROMETHEUS_HOST: "prometheus-service"
+  PROMETHEUS_PORT: "9090"
+  
+  # Performance Settings
+  GUNICORN_WORKERS: "4"
+  GUNICORN_MAX_REQUESTS: "1000"
+  GUNICORN_MAX_REQUESTS_JITTER: "50"
+  
+  # Logging Configuration
+  LOG_LEVEL: "INFO"
+  LOG_FORMAT: "json"
+  
+  # Rate Limiting
+  RATE_LIMIT_PER_MINUTE: "60"
+  RATE_LIMIT_BURST: "100"
+  
+  # Cache Settings
+  CACHE_TTL: "3600"
+  CACHE_MAX_ENTRIES: "10000"
+  
+  # Health Check Settings
+  HEALTH_CHECK_TIMEOUT: "30"
+  HEALTH_CHECK_INTERVAL: "60"
+  
+  # Feature Flags
+  ENABLE_CHATBOT: "true"
+  ENABLE_RECOMMENDATIONS: "true"
+  ENABLE_PRODUCT_DESCRIPTIONS: "true"
+  ENABLE_REVIEW_ANALYSIS: "true"
+  ENABLE_AUTO_SCALING: "true"
+  ENABLE_PERFORMANCE_MONITORING: "true"
+  
+  # Scaling Configuration
+  CPU_THRESHOLD: "70"
+  MEMORY_THRESHOLD: "80"
+  
+  # Security Settings
+  CORS_CREDENTIALS: "true"
+  
+  # Timezone
+  TIMEZONE: "UTC"
+  DEFAULT_LANGUAGE: "en"
